@@ -7,8 +7,13 @@ name: Fork build (GHCR, manual)
 on:
   workflow_dispatch:
     inputs:
+      source_ref:
+        description: 'Branch / tag / SHA to build (default: main)'
+        required: false
+        type: string
+        default: 'main'
       tag_suffix:
-        description: 'Override the auto tag (default: <branch>-<shortsha>)'
+        description: 'Override the auto tag (default: <ref>-<shortsha>)'
         required: false
         type: string
       update_latest:
@@ -25,8 +30,10 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Checkout
+      - name: Checkout source ref
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
 
       - name: Resolve image tag
         id: tag
@@ -34,9 +41,9 @@ jobs:
           if [ -n "${{ inputs.tag_suffix }}" ]; then
             VERSION="${{ inputs.tag_suffix }}"
           else
-            BRANCH=$(echo "${{ github.ref_name }}" | tr '/' '-')
+            REF=$(echo "${{ inputs.source_ref }}" | tr '/' '-')
             SHORT_SHA=$(git rev-parse --short HEAD)
-            VERSION="${BRANCH}-${SHORT_SHA}"
+            VERSION="${REF}-${SHORT_SHA}"
           fi
           echo "$VERSION" > VERSION
           echo "VERSION=$VERSION" >> $GITHUB_ENV
