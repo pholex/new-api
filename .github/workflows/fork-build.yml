@@ -1,0 +1,91 @@
+name: Fork build (GHCR, manual)
+
+# Manually triggered build for the fork. Pushes a single-arch (linux/arm64)
+# image to GHCR under ghcr.io/<owner>/new-api. Use the Actions tab on the
+# fork to run it; pick the branch you want to build at dispatch time.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_suffix:
+        description: 'Override the auto tag (default: <branch>-<shortsha>)'
+        required: false
+        type: string
+      update_latest:
+        description: 'Also tag this build as :latest'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    name: Build & push (linux/arm64)
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: tag
+        run: |
+          if [ -n "${{ inputs.tag_suffix }}" ]; then
+            VERSION="${{ inputs.tag_suffix }}"
+          else
+            BRANCH=$(echo "${{ github.ref_name }}" | tr '/' '-')
+            SHORT_SHA=$(git rev-parse --short HEAD)
+            VERSION="${BRANCH}-${SHORT_SHA}"
+          fi
+          echo "$VERSION" > VERSION
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "value=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building tag: $VERSION"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image name (lowercased)
+        id: image
+        run: |
+          IMAGE="ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/new-api"
+          echo "name=$IMAGE" >> $GITHUB_OUTPUT
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ env.VERSION }}
+            ${{ inputs.update_latest && format('{0}:latest', steps.image.outputs.name) || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+      - name: Summary
+        run: |
+          IMAGE='${{ steps.image.outputs.name }}'
+          echo "## Built image" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Pull on the server:" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${IMAGE}:${VERSION}" >> $GITHUB_STEP_SUMMARY
+          if [ '${{ inputs.update_latest }}' = 'true' ]; then
+            echo "docker pull ${IMAGE}:latest" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "On first build the GHCR package will be **private**. Make it" >> $GITHUB_STEP_SUMMARY
+          echo "public at: https://github.com/users/${{ github.repository_owner }}/packages/container/new-api/settings" >> $GITHUB_STEP_SUMMARY
+          echo "(or keep it private and 'docker login ghcr.io' on the EC2 host with a PAT)." >> $GITHUB_STEP_SUMMARY
